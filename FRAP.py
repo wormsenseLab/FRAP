@@ -9,15 +9,17 @@ from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit
 import datetime
 import seaborn as sns
+
 #%%
 def recovery(t, a, b):
     return a*(1-np.exp(-b*t))
 
 def diff_coeff(r, t):
     return 0.224*(r**2/t)
+
 #%%
 fpath  = 'G:/My Drive/ECM manuscript/github codes/FRAP/sample_data/input_files/'   #filepath for input files
-dfpath = 'G:/My Drive/ECM manuscript/github codes/FRAP/sample_data/output_files/'     #destination filepath for output files
+dfpath = 'G:/My Drive/ECM manuscript/github codes/FRAP/sample_data/output_files/'  #destination filepath for output files
 
 toa = str(datetime.datetime.today()).split()
 today = toa[0]
@@ -46,13 +48,8 @@ strain_key=pandas.DataFrame({('GN753', 'WT', 0),
                              }, columns=['Strain','Allele', 'n'])
 strain_key=strain_key.set_index('Strain')
 
-umperpx=0.283
+umperpx=0.283               #pixels to microns conversion factor based on image acquisition settings
 
-sns.set_style('white')
-sns.set_style('ticks', {'xtick.direction': 'in', 'ytick.direction': 'in'})
-sns.despine(offset=2, trim=True)
-plt.rcParams.update({'font.size': 10})
-plt.rcParams['svg.fonttype'] = 'none'
 #%%
 for x in imgfiles:                          #create loop for number of images in folder
     imseq = imageio.get_reader(fpath+x)           #import image and store it in a list of lists
@@ -69,34 +66,35 @@ for x in imgfiles:                          #create loop for number of images in
     else:
         time = np.append(np.arange(-10,0,1), np.arange(0,60*5,5))       # pre-bleach 10 frames @ 1 sec interval, post-bleach  @ 5 sec interval
     
-    
+    #get the number of columns in the image
     for frame in imseq:
         columns=np.shape(frame)[1]
         break
     
+    #create the image matrix 
     imarray=np.zeros((70,21,columns))
     c=0
     for frame in imseq:
         imarray[c]=imarray[c]+frame
         c=c+1
     
-    #detecting the bleached region by subtracting the mean of the first 3 post-bleach frames from the mean of the last three pre-bleach frames
+    #detecting the bleached region by subtracting the mean of the first 3 post-bleach frames from the mean of the last 3 pre-bleach frames
     dif = gaussian_filter(np.mean(imarray[7:10,:,:], axis=(0,1))-np.mean(imarray[10:13,:,:], axis=(0,1)), sigma=3)
     bl_pos=np.argmax(dif)
     
     
-    roiw = peak_widths(dif, [bl_pos], rel_height=0.5)
+    roiw = peak_widths(dif, [bl_pos], rel_height=0.5) #define width of the bleached region as the peak width at half maxima of the bleach position peak
     bleach_start = int(roiw[2][0])
     bleach_end = int(roiw[3][0])
 
-    #reject if bleach region is too close to edges
+    #reject if bleach region is too close to edges (less than 7 pixels from either edge)
     if bleach_start<7 or bleach_end>columns-7:
         reason = 'Bleach region too close to edges'
         frame = pandas.DataFrame([[x, reason]], columns=cols_Rejects)
         df_Rejects = df_Rejects.append(frame)
         continue
         
-    #reject if detected bleach region is less than 5 pixels
+    #reject if detected bleach region is too narrow (less than 5 pixels)
     if roiw[0][0]<5:
         reason = 'Too narrow bleach region'
         frame = pandas.DataFrame([[x, reason]], columns=cols_Rejects)
@@ -136,9 +134,9 @@ for x in imgfiles:                          #create loop for number of images in
     bl_pre = np.mean(bl[:10])
     bl_norm = (bl-bl[10])/(bl_pre-bl[10])
 
-    blcorr = bl/nonbl
-    blcorr_pre = np.mean(blcorr[:10])
-    blcorr_norm = (blcorr-blcorr[10])/(blcorr_pre-blcorr[10])
+    blcorr = bl/nonbl                                               #correct the fluorescence of the bleached region over time for overall photobleaching
+    blcorr_pre = np.mean(blcorr[:10])                               #calculate the average pre-bleach fluorescence of the bleached region after correction
+    blcorr_norm = (blcorr-blcorr[10])/(blcorr_pre-blcorr[10])       #normalize the corrected fluorescence (1=average pre-bleach, 0=first frame post bleach)
     
     #reject if drop in intensity in the roi is less than half of pre-bleach intensity
     if (bl_pre-bl[10])<0.5*bl_pre:
@@ -165,18 +163,19 @@ for x in imgfiles:                          #create loop for number of images in
     strain_key.at[strain,'n']=count
     
 
-    # #create figure for the kymograph
+    # create figure
     plt.figure(1, figsize=(0.02*columns, 10))
     grid = plt.GridSpec(5, 6, wspace=0.5, hspace=0.5)
     
+    #plot the kymograph
     plt.subplot(grid[0, 0:])
     plt.title(x)
-    
     kymo = np.mean(roi_cell, axis=1)
     plt.imshow(kymo)
     
     xaxis=np.arange(0, columns)*umperpx
     
+    #plot the average pre-bleach fluorescence
     plt.subplot(grid[1, 0:])
     plt.plot(xaxis, np.mean(kymo[:10,:], axis=0))
     plt.xlim(0,columns*umperpx)
@@ -185,6 +184,7 @@ for x in imgfiles:                          #create loop for number of images in
     plt.xlabel('Distance from cell body (um)')
     plt.ylabel('Pre bleach intensity (AU)')      
     
+    #plot the change in fluorescence between pre- and pos-bleaching to locate bleached region
     plt.subplot(grid[2, 0:])
     plt.plot(xaxis, dif)
     plt.plot(bl_pos*umperpx, dif[bl_pos], 'go')
@@ -193,12 +193,14 @@ for x in imgfiles:                          #create loop for number of images in
     plt.xlabel('Distance from cell body (um)')
     plt.ylabel('Intensity difference (AU)')      
     
+    #plot average intensity of the bleached and non-bleached areas vs. time
     plt.subplot(grid[3:5, 0:3])
     plt.plot(time, bl, 'b-')
     plt.plot(time, nonbl, 'g-')
     plt.xlabel('Time (s)')
     plt.ylabel('Intensity (AU)')
    
+    #plot corrected and normalized fluorescence intensities vs. time
     plt.subplot(grid[3:5, 3:6])
     plt.plot(time, bl_norm, 'b-')
     plt.plot(time, nonbl_norm, 'g-')
@@ -212,9 +214,9 @@ for x in imgfiles:                          #create loop for number of images in
     plt.show()
     plt.close()
 
-    r100=np.mean(blcorr_norm[29:32])
-    r200=np.mean(blcorr_norm[49:52])
-    r300=np.mean(blcorr_norm[67:])
+    r100=np.mean(blcorr_norm[29:32])        #average recovery at 100s
+    r200=np.mean(blcorr_norm[49:52])        #average recovery at 200s
+    r300=np.mean(blcorr_norm[67:])          #average recovery at 300s
 
     # add image data to pandas dataframe
     all_data1 = pandas.DataFrame({'Date':[date]*70, 'Strain':[strain]*70, 'Allele':[allele]*70, 'ImageID':[x]*70, 'Time(s)':time, 'Raw bl_roi intensity':bl, 'Raw nonbl_roi intensity':nonbl, 'FRAP intensity':blcorr_norm}, columns=cols_Data)
