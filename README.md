@@ -1,3 +1,5 @@
+https://zenodo.org/doi/10.5281/zenodo.10223517
+
 # FRAP
 Python script for calculating fluorescence recovery after photobleaching in C. elegans touch receptor neurons
 
